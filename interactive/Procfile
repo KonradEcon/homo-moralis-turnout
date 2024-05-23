@@ -1,0 +1,1 @@
+web: bokeh serve *.py --port=$PORT --allow-websocket-origin=homo-moralis-interactive-tool-005ed7c008c4.herokuapp.com
