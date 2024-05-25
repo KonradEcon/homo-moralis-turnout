@@ -41,8 +41,8 @@ z[z==0] = np.NaN
 w[w==0] = np.NaN
 
 # Set up plot
-plot = figure(height=600, width=750, title="Best responses",
-              tools="crosshair,pan,reset,save,wheel_zoom",
+plot = figure(height=600, width=750, title="Consistent strategies",
+              tools="crosshair,pan,reset,save,wheel_zoom",x_axis_label='a',y_axis_label='b',
               x_range=[-0.05,av_init+0.05], y_range=[-0.05,bv_init+0.05])
 
 cost_plot = figure(height=200, width=250, title="Cost function (of $$a^i$$)")

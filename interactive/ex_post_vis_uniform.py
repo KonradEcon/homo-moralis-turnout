@@ -32,8 +32,8 @@ z[z==0] = np.NaN
 w[w==0] = np.NaN
 
 # Set up plot
-plot = figure(height=600, width=750, title="Best responses",
-              tools="crosshair,pan,reset,save,wheel_zoom",
+plot = figure(height=600, width=750, title="Consistent strategies",
+              tools="crosshair,pan,reset,save,wheel_zoom",x_axis_label='a',y_axis_label='b',
               x_range=[a0_init-0.05,a0_init+av_init+0.05], y_range=[b0_init-0.05,b0_init+bv_init+0.05])
 
 source_a = ColumnDataSource(data=dict(x=x,y=y))
