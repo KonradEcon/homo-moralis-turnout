@@ -170,6 +170,15 @@ def make_param_string(param_arr,pos1,pos2):
 
     return str1
 
+def make_param_string_all(param_arr):
+    name_dict = {0:'$m$',1:r'$\theta$',2:r'$\kappa$',3:'$a_0$',4:'$b_0$',5:'$a_v$',6:r'$\rho$',7:'$b_v$'}
+    str1 = ""
+    for i in range(0,8):
+        str1 += name_dict[i] + "=" + str(param_arr[i])
+        if i < 7:
+            str1 += ", "
+    return str1
+
 def plot_counts(arr_i,arr_j,amount_eq,amount_eq_winning,name1,name2,fn1,fn2,str1):
     cmap = plt.get_cmap('viridis',4)
     norm = plc.BoundaryNorm([-0.5,0.5,1.5,2.5,3.5],4)
@@ -203,18 +212,7 @@ def plot_turnouts_utilities(arr_i,arr_j,turnouts,utilities,name1,name2,fn1,fn2,s
     plt.savefig("2d_plots/vis_turnouts_" + fn1 + "_"+ fn2 + "_high_res.png",format="png",bbox_inches='tight',dpi=1200)
     plt.savefig("2d_plots/vis_turnouts_" + fn1 + "_"+ fn2 + "_low_res.png",format="png",bbox_inches='tight',dpi=300)
     plt.close()
-
-    # X,Y = np.meshgrid(arr_j,arr_i)
-    # fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
-    # mappable = ax.plot_surface(X,Y,turnouts,cmap='viridis')
-    # ax.set_xlabel(name1)
-    # ax.set_ylabel(name2)
-    # fig.text(0.5,-0.01,str1,ha="center")
-    # plt.savefig("2d_plots/vis_turnouts_" + fn1 + "_"+ fn2 + "_high_res.png",format="png",bbox_inches='tight',dpi=1200)
-    # plt.savefig("2d_plots/vis_turnouts_" + fn1 + "_"+ fn2 + "_low_res.png",format="png",bbox_inches='tight',dpi=300)
-    # plt.close()
-
-
+    
     fig, ax = plt.subplots(figsize=(6.4,4.8))
     mappable = ax.pcolormesh(arr_j,arr_i,utilities,cmap='viridis')
     ax.set_xlabel(name1)
@@ -224,13 +222,3 @@ def plot_turnouts_utilities(arr_i,arr_j,turnouts,utilities,name1,name2,fn1,fn2,s
     plt.savefig("2d_plots/vis_utilities_" + fn1 + "_"+ fn2 + "_high_res.png",format="png",bbox_inches='tight',dpi=1200)
     plt.savefig("2d_plots/vis_utilities_" + fn1 + "_"+ fn2 + "_low_res.png",format="png",bbox_inches='tight',dpi=300)
     plt.close()
-
-    # fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
-    # mappable = ax.plot_surface(X,Y,utilities,cmap='viridis')
-    # ax.set_xlabel(name1)
-    # ax.set_ylabel(name2)
-    # fig.text(0.5,-0.01,str1,ha="center")
-    # plt.savefig("2d_plots/vis_utilities_" + fn1 + "_"+ fn2 + "_high_res.png",format="png",bbox_inches='tight',dpi=1200)
-    # plt.savefig("2d_plots/vis_utilities_" + fn1 + "_"+ fn2 + "_low_res.png",format="png",bbox_inches='tight',dpi=300)
-    # plt.close()
-    

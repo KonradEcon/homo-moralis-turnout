@@ -306,6 +306,21 @@ def make_param_string(param_arr,pos1,pos2):
 
     return str1
 
+def make_param_string_all(param_arr):
+    name_dict = {0:'$m=$',1:r'$\theta_A=$',2: r'$\theta_B=$',3:r'$\kappa=$',5:'$a_0=$',6:'$b_0=$',7:'$a_v=$',4:r'$\rho=$',8:r'$b_v=\frac{b_0 a_v}{a_0}\approx$'}
+    poslist = [i for i in range(0,9)]
+
+    str1 = ""
+    for i in range(0,9):
+        if poslist[i] == 8:
+            str1 += name_dict[poslist[i]] + str(np.round(param_arr[poslist[i]],2))
+        else:
+            str1 += name_dict[poslist[i]] + str(param_arr[poslist[i]])
+        if i < 8:
+            str1 += ", "
+
+    return str1
+
 def plot_counts(arr_i,arr_j,amount_eq,a_winning,b_winning,name1,name2,fn1,fn2,str1):
     cmap_len = np.max(amount_eq)+1
     cmap = plt.get_cmap('viridis',cmap_len)

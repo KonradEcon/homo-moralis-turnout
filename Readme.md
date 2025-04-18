@@ -22,7 +22,7 @@ after activating the virtual environment and changing directory into the cloned 
 
 
 ## How to use
-The code used to generate graphics for the ex-ante and ex-post cases of our paper can be found in the `ex_ante` and `ex_post` folders, respectively. More precisely, the files ending in `1d` will generate all the line plots, and the files ending in `2d` will generate the 2D graphics that show the number of equilibria or turnouts or utilities while varying two parameters.
+The code used to generate graphics for the ex-ante and ex-post cases of our paper can be found in the `ex_ante` and `ex_post` folders, respectively. More precisely, the files ending in `1d.py` will generate all the line plots. The 2D graphics (that show the number of equilibria or turnouts or utilities while varying two parameters) are created in two steps: as the computation takes a significant amount of time, the underlying numpy arrays are computed in the files ending in `2d_calculations.py` and saved in a cache directory (make sure to modify). Then, the numpy arrays are plotted in the files ending in `2d_plots.py`. This allows adjusting the plots without having to recompute the underlying data.
 
 `symbolic_calculations.ipynb` is a Jupyter notebook that performs the symbolic calculations, using `SymPy`, that are needed in order to obtain the polynomial coefficients used for computing equilibrium and deviation candidates in the ex-ante and ex-post code.
 
@@ -34,17 +34,3 @@ You may increase the grid size in the script, but check to have enough RAM, disk
 `explore_parameter_space_same_cost_structure.py` does the same for what we call the groups having "same cost structure" in the paper. This reduces the size of the parameter space to search, so one can increase $N$ a bit more here.
 
 All other files in the `ex_ante` and `ex_post` folders contain helper functions for the scripts described above.
-
-The source code of our interactive plot can be found in the `interactive` folder. It contains all the relevant files for setting up a Heroku app, except that one needs to compile the functions using `python setup.py` first. Note that in order to do this, you must have `python dev` installed for Python 3.11. On fedora, you can install this using
-```
-sudo dnf install python3.11-devel
-```
-This should work similarly for other Linux distributions.
-
-Running `setup.py` creates a python module. One can then run the interactive plot locally by running, from that folder,
-```
-bokeh serve ex_post_vis_bokeh.py
-```
-and similarly for the other interactive plots.
-
-The `Procfile`, `runtime.txt` and the additional `requirements.txt` are only for setting up a Heroku server.
