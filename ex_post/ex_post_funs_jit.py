@@ -360,10 +360,10 @@ def plot_counts(arr_i,arr_j,amount_eq,a_winning,b_winning,name1,name2,fn1,fn2,st
     plt.close()
 
 def plot_turnouts_utilities(arr_i,arr_j,turnouts_a,turnouts_b,utilities_a,utilities_b,name1,name2,fn1,fn2,str1):
-    turnouts_a[turnouts_a>99] = np.NaN
-    utilities_a[utilities_a>99] = np.NaN
-    turnouts_b[turnouts_b>99] = np.NaN
-    utilities_b[utilities_b>99] = np.NaN
+    turnouts_a[turnouts_a>99] = np.nan
+    utilities_a[utilities_a>99] = np.nan
+    turnouts_b[turnouts_b>99] = np.nan
+    utilities_b[utilities_b>99] = np.nan
     X,Y = np.meshgrid(arr_j,arr_i)
     fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
     mappable = ax.plot_surface(X,Y,turnouts_a,cmap='viridis')
@@ -409,10 +409,10 @@ def plot_turnouts_utilities(arr_i,arr_j,turnouts_a,turnouts_b,utilities_a,utilit
     plt.close()
 
 def plot_turnouts_utilities_flat(arr_i,arr_j,turnouts_a,turnouts_b,utilities_a,utilities_b,name1,name2,fn1,fn2,str1):
-    turnouts_a[turnouts_a>99] = np.NaN
-    utilities_a[utilities_a>99] = np.NaN
-    turnouts_b[turnouts_b>99] = np.NaN
-    utilities_b[utilities_b>99] = np.NaN
+    turnouts_a[turnouts_a>99] = np.nan
+    utilities_a[utilities_a>99] = np.nan
+    turnouts_b[turnouts_b>99] = np.nan
+    utilities_b[utilities_b>99] = np.nan
     fig = plt.figure(figsize=(6,5),layout=None)
     ax = fig.add_axes([0.09,0.15,0.95,0.82],anchor="C")
     mappable = ax.pcolormesh(arr_j,arr_i,turnouts_a,cmap='viridis')

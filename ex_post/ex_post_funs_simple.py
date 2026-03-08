@@ -183,32 +183,35 @@ def is_group_br_b_single(b,m,the,kap,rho,b0,bv,a,eps):
     return index_max == index_root
 
 def find_all_equilibria(m,thea,theb,kap,rho,a0,b0,av,bv,eps):
-    roots = resultant_roots(m,thea,theb,kap,rho,b0,bv,a0,av)
-    cand_tup = candidates_from_roots(roots,rho,thea,theb,a0,b0,av,bv,eps)
-    len_int = len(cand_tup[0])
-    corner_cand_a = find_group_br_a(m,thea,kap,a0,av,b0+bv,eps)
-    len_a = len(corner_cand_a)
-    a_array = np.append(cand_tup[0],corner_cand_a)
-    b_array = np.append(cand_tup[1],b0+bv*np.ones(len_a))
-    corner_cand_b = find_group_br_b(m,theb,kap,rho,b0,bv,a0+av,eps)
-    len_b = len(corner_cand_b)
-    if corner_cand_a[-1] == a0 + av:
-        if len_b > 1:
-            a_array = np.append(a_array,a0+av*np.ones(len_b-1))
-            b_array = np.append(b_array,corner_cand_b[:-1])
-        len_b -= 1
-    else:
-        a_array = np.append(a_array,a0+av*np.ones(len_b))
-        b_array = np.append(b_array,corner_cand_b)
+    if kap > 0:
+        roots = resultant_roots(m,thea,theb,kap,rho,b0,bv,a0,av)
+        cand_tup = candidates_from_roots(roots,rho,thea,theb,a0,b0,av,bv,eps)
+        len_int = len(cand_tup[0])
+        corner_cand_a = find_group_br_a(m,thea,kap,a0,av,b0+bv,eps)
+        len_a = len(corner_cand_a)
+        a_array = np.append(cand_tup[0],corner_cand_a)
+        b_array = np.append(cand_tup[1],b0+bv*np.ones(len_a))
+        corner_cand_b = find_group_br_b(m,theb,kap,rho,b0,bv,a0+av,eps)
+        len_b = len(corner_cand_b)
+        if corner_cand_a[-1] == a0 + av:
+            if len_b > 1:
+                a_array = np.append(a_array,a0+av*np.ones(len_b-1))
+                b_array = np.append(b_array,corner_cand_b[:-1])
+            len_b -= 1
+        else:
+            a_array = np.append(a_array,a0+av*np.ones(len_b))
+            b_array = np.append(b_array,corner_cand_b)
 
-    tf_array = np.ones(len(a_array),dtype=np.bool_)
-    for i in range(0,len_int):
-        tf_array[i] = is_group_br_a_single(a_array[i],m,thea,kap,a0,av,b_array[i],eps) and is_group_br_b_single(b_array[i],m,theb,kap,rho,b0,bv,a_array[i],eps)
-    for i in range(len_int,len_int+len_a):
-        tf_array[i] = is_group_br_b_single(b_array[i],m,theb,kap,rho,b0,bv,a_array[i],eps)
-    for i in range(len_int+len_a,len_int+len_a+len_b):
-        tf_array[i] = is_group_br_a_single(a_array[i],m,thea,kap,a0,av,b_array[i],eps)
-    return (a_array[tf_array],b_array[tf_array])
+        tf_array = np.ones(len(a_array),dtype=np.bool_)
+        for i in range(0,len_int):
+            tf_array[i] = is_group_br_a_single(a_array[i],m,thea,kap,a0,av,b_array[i],eps) and is_group_br_b_single(b_array[i],m,theb,kap,rho,b0,bv,a_array[i],eps)
+        for i in range(len_int,len_int+len_a):
+            tf_array[i] = is_group_br_b_single(b_array[i],m,theb,kap,rho,b0,bv,a_array[i],eps)
+        for i in range(len_int+len_a,len_int+len_a+len_b):
+            tf_array[i] = is_group_br_a_single(a_array[i],m,thea,kap,a0,av,b_array[i],eps)
+        return (a_array[tf_array],b_array[tf_array])
+    else:
+        return (np.array([a0]),np.array([b0]))
 
 
 def find_equilibria_interior(m,thea,theb,kap,rho,a0,b0,av,bv,eps):

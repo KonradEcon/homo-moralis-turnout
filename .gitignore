@@ -1,2 +1,7 @@
 ex_post/__pycache__
 ex_ante/__pycache__
+symbolic_existence_kappa.ipynb
+*.png
+*.npz
+AGENTS.md
+.venv
