@@ -5,3 +5,5 @@ symbolic_existence_kappa.ipynb
 *.npz
 AGENTS.md
 .venv
+.jupyter_ystore.db
+.ipynb_checkpoints

@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.optimize as sco
 
 def h(x,m):
     return np.arctan(m*x)/np.arctan(m)
@@ -46,6 +47,33 @@ def roots_aux_b(m, theb, kap,rho, b0, bv,a):
     coeffs[3] = -a**2*b0*m**2 - a**2*b0 - 2*a*bv**2*kap*m*rho/(theb*np.arctan(m))
 
     return np.roots(coeffs)
+
+def roots_aux_a_fixed_a(m, thea, kap, a0, av,a):
+    coeffs = np.empty(3,dtype=np.complex128)
+
+    coeffs[0] = (m**2 + 1)*(a-a0)
+    coeffs[1] = 2*(1-m**2)*a*(a-a0) - 2*av**2*kap*m/(thea*np.arctan(m))
+    coeffs[2] = (m**2 + 1)*a**2*(a-a0)
+
+    return np.roots(coeffs)
+
+def roots_aux_b_fixed_b(m, theb, kap,rho, b0, bv,b):
+    coeffs = np.empty(3,dtype=np.complex128)
+
+    coeffs[0] = (m**2 + 1)*(b-b0)
+    coeffs[1] = 2*(1-m**2)*b*(b-b0) - 2*bv**2*kap*m*rho/(theb*np.arctan(m))
+    coeffs[2] = (m**2 + 1)*b**2*(b-b0)
+
+    return np.roots(coeffs)
+
+def residual_aux_a_fixed_ab_m(m, thea, kap, a0, av,a,b):
+    if np.abs(m) < 1e-12:
+        m_atan_ratio = 1.0
+    else:
+        m_atan_ratio = m / np.arctan(m)
+
+    interaction = (1+m**2) * (a**2 + b**2) + (2-2*m**2) * a * b
+    return interaction * (a-a0) - 2*av**2*b*kap*m_atan_ratio/thea
 
 def roots_utility_a(m, thea, kap, a0, av,a,b):
     coeffs = np.empty(4,dtype=np.complex128)
@@ -98,9 +126,11 @@ def is_group_br_b(roots,m,the,kap,rho,b0,bv,a,eps):
 def find_group_br_a(m,the,kap,a0,av,b,eps):
     roots = roots_aux_a(m, the, kap,a0,av,b)
     roots = np.real(roots[np.abs(np.imag(roots))< eps]) # only real roots
-    if np.any(roots> a0 + av):
-        roots = roots[roots < a0 + av] # only admissible
-        roots = np.append(roots, a0+av) # append potential corner solution
+    roots = roots[roots >= a0] # only admissible roots
+    if np.any(roots > a0 + av):
+        roots = roots[roots <= a0 + av]
+        if not np.any(np.abs(roots - (a0 + av)) < eps):
+            roots = np.append(roots, a0+av) # append potential corner solution
 
     tf_array = is_group_br_a(roots,m,the,kap,a0,av,b,eps)
     return roots[tf_array]
@@ -108,9 +138,11 @@ def find_group_br_a(m,the,kap,a0,av,b,eps):
 def find_group_br_b(m,the,kap,rho,b0,bv,a,eps):
     roots = roots_aux_b(m, the, kap,rho,b0,bv,a)
     roots = np.real(roots[np.abs(np.imag(roots))< eps]) # only real roots
-    if np.any(roots> b0 + bv):
-        roots = roots[roots < b0 + bv] # only admissible roots
-        roots = np.append(roots, b0+bv) # append potential corner solution
+    roots = roots[roots >= b0] # only admissible roots
+    if np.any(roots > b0 + bv):
+        roots = roots[roots <= b0 + bv]
+        if not np.any(np.abs(roots - (b0 + bv)) < eps):
+            roots = np.append(roots, b0+bv) # append potential corner solution
     
     tf_array = is_group_br_b(roots,m,the,kap,rho,b0,bv,a,eps)
     return roots[tf_array]
@@ -127,6 +159,23 @@ def find_group_br_a_vecb(m,the,kap,a0,av,b_vec,eps):
             count += 1
     return (x,y)
 
+def find_group_br_a_veca(m,the,kap,a0,av,b0,bv,a_vec,eps):
+    num_points = max(len(a_vec)-1,0)
+    x = np.zeros(2*num_points)
+    y = np.zeros(2*num_points)
+    count = 0
+    for i in range(1,len(a_vec)):
+        b_list = roots_aux_a_fixed_a(m, the, kap,a0,av,a_vec[i])
+        b_list = np.real(b_list[np.abs(np.imag(b_list)) < eps]) # only real roots
+        b_list = b_list[b_list >= b0] # only admissible roots
+        b_list = b_list[b_list <= b0 + bv]
+        for j in range(0,len(b_list)):
+            if is_group_br_a_single(a_vec[i],m,the,kap,a0,av,b_list[j],eps):
+                x[count] = a_vec[i]
+                y[count] = b_list[j]
+                count += 1
+    return (x,y)
+
 def find_group_br_b_veca(m,the,kap,rho,b0,bv,a_vec,eps):
     x = np.zeros(3*len(a_vec))
     y = np.zeros(3*len(a_vec))
@@ -138,6 +187,78 @@ def find_group_br_b_veca(m,the,kap,rho,b0,bv,a_vec,eps):
             y[count] = br_list[j]
             count += 1
     return (x,y)
+
+def find_group_br_b_vecb(m,the,kap,rho,b0,bv,a0,av,b_vec,eps):
+    num_points = max(len(b_vec)-1,0)
+    x = np.zeros(2*num_points)
+    y = np.zeros(2*num_points)
+    count = 0
+    for i in range(1,len(b_vec)):
+        a_list = roots_aux_b_fixed_b(m, the, kap,rho,b0,bv,b_vec[i])
+        a_list = np.real(a_list[np.abs(np.imag(a_list)) < eps]) # only real roots
+        a_list = a_list[a_list >= a0] # only admissible roots
+        a_list = a_list[a_list <= a0 + av]
+        for j in range(0,len(a_list)):
+            if is_group_br_b_single(b_vec[i],m,the,kap,rho,b0,bv,a_list[j],eps):
+                x[count] = a_list[j]
+                y[count] = b_vec[i]
+                count += 1
+    return (x,y)
+
+def find_group_br_a_m_given_a(m_vec,the,kap,a0,av,a,b,eps):
+    if len(m_vec) == 0:
+        return np.array([])
+
+    residuals = np.empty(len(m_vec))
+    for i in range(0,len(m_vec)):
+        residuals[i] = residual_aux_a_fixed_ab_m(m_vec[i],the,kap,a0,av,a,b)
+
+    roots = []
+    near_zero_tol = 1e-8
+    for i in range(0,len(m_vec)):
+        if np.abs(residuals[i]) < near_zero_tol:
+            roots.append(m_vec[i])
+
+    for i in range(0,len(m_vec)-1):
+        if residuals[i] * residuals[i+1] < 0:
+            sol = sco.root_scalar(
+                residual_aux_a_fixed_ab_m,
+                bracket=(m_vec[i],m_vec[i+1]),
+                args=(the,kap,a0,av,a,b),
+                method="brentq",
+            )
+            if sol.converged:
+                roots.append(sol.root)
+
+    if len(roots) == 0:
+        return np.array([])
+
+    roots = np.array(sorted(roots))
+    if len(m_vec) > 1:
+        dedup_tol = max((m_vec[-1]-m_vec[0])/(1000*(len(m_vec)-1)),eps)
+    else:
+        dedup_tol = eps
+
+    unique_roots = [roots[0]]
+    for i in range(1,len(roots)):
+        if np.abs(roots[i] - unique_roots[-1]) > dedup_tol:
+            unique_roots.append(roots[i])
+
+    roots = np.array(unique_roots)
+    tf_array = np.zeros(len(roots),dtype=np.bool_)
+    for i in range(0,len(roots)):
+        tf_array[i] = is_group_br_a_single(a,roots[i],the,kap,a0,av,b,eps)
+    return roots[tf_array]
+
+def find_group_br_a_vecm_from_a(m_vec,the,kap,a0,av,b,a_vec,eps):
+    x = []
+    y = []
+    for i in range(1,len(a_vec)):
+        m_list = find_group_br_a_m_given_a(m_vec,the,kap,a0,av,a_vec[i],b,eps)
+        for j in range(0,len(m_list)):
+            x.append(m_list[j])
+            y.append(a_vec[i])
+    return (np.array(x),np.array(y))
 
 def resultant_roots(m,thea,theb,kap,rho,b0,bv,a0,av):
     coeffs = np.empty(5,dtype=np.complex128)

@@ -2,20 +2,562 @@ from ex_post_funs_simple import *
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import scipy.optimize as sco
+import warnings
+from matplotlib.legend_handler import HandlerTuple
+
+plt.style.use("seaborn-v0_8-whitegrid")
+mpl.rcParams["axes.xmargin"] = 0
+mpl.rcParams["axes.ymargin"] = 0
+mpl.rcParams["axes.axisbelow"] = True
+mpl.rcParams["legend.frameon"] = True
+mpl.rcParams["legend.framealpha"] = 0.75
+mpl.rcParams["legend.fancybox"] = True
+mpl.rcParams["legend.facecolor"] = "white"
+mpl.rcParams["legend.edgecolor"] = "0.7"
 
 viridis_map = mpl.colormaps.get_cmap('viridis') # getting some colors
 viridis = viridis_map(np.linspace(0,1,8))
 color_a = "black"
 color_b = viridis[6]
+consistent_color_a = viridis[1]
+consistent_linewidth = 1.5
+equilibrium_marker_outer_size = 70
+equilibrium_marker_inner_size = 4
+deviation_equilibrium_marker_outer_size = equilibrium_marker_outer_size
+deviation_equilibrium_marker_inner_size = equilibrium_marker_inner_size
+equilibrium_marker_zorder = 5
+equilibrium_marker_color = "black"
+equilibrium_marker_facecolor = (1.0,1.0,1.0,0.5)
+equilibrium_legend_markersize = np.sqrt(equilibrium_marker_outer_size)
+equilibrium_legend_inner_markersize = np.sqrt(equilibrium_marker_inner_size)
+residual_scatter_size = 4
 
-def do_plot(m,kap,rho,thea,theb,av,bv,a0,b0,eps,N,name,approx=False,add=None,approx2=False):
+def set_axis_bounds(ax, xlim=None, ylim=None):
+    ax.set_axisbelow(True)
+    for spine in ax.spines.values():
+        spine.set_zorder(0)
+    for line in ax.lines:
+        line.set_clip_on(False)
+    for collection in ax.collections:
+        if isinstance(collection,(mpl.collections.PathCollection,mpl.collections.LineCollection)):
+            collection.set_clip_on(False)
+    ax.margins(x=0,y=0)
+    ax.autoscale(enable=True, axis="both", tight=True)
+    if xlim is not None:
+        ax.set_xlim(*xlim)
+    if ylim is not None:
+        ax.set_ylim(*ylim)
+
+def format_numeric_tick(value):
+    rounded_value = np.round(value,2)
+    label = f"{rounded_value:.2f}".rstrip("0").rstrip(".")
+    if label == "-0":
+        label = "0"
+    return label
+
+def set_boundary_ticks(ax,a0,av,b0,bv,num_ticks=6):
+    x_ticks = np.linspace(a0,a0+av,num_ticks)
+    y_ticks = np.linspace(b0,b0+bv,num_ticks)
+    ax.set_xticks(x_ticks)
+    ax.set_xticklabels([format_numeric_tick(value) for value in x_ticks])
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels([format_numeric_tick(value) for value in y_ticks])
+    ax.tick_params(axis="x",top=False,labeltop=False,bottom=True,labelbottom=True)
+    ax.tick_params(axis="y",right=False,labelright=False,left=True,labelleft=True)
+    ax.spines["top"].set_visible(True)
+    ax.spines["right"].set_visible(True)
+
+def set_axes_bounds(axes, xlim=None, ylim=None):
+    for current_ax in np.ravel(np.atleast_1d(axes)):
+        set_axis_bounds(current_ax, xlim=xlim, ylim=ylim)
+
+def turnout_bounds(a0,av,b0,bv):
+    return (min(a0,b0),max(a0+av,b0+bv))
+
+def equilibrium_marker_label(total):
+    if total == 1:
+        return "Equilibrium"
+    return "Equilibria"
+
+def equilibrium_pair_label(total,index):
+    if total == 1:
+        return "Equilibrium"
+    return r"$(a,b)=(a_" + str(index+1) + r",b_" + str(index+1) + r")$"
+
+def plot_bullseye(ax,x,y,color,outer_size,inner_size,zorder,label="_nolegend_"):
+    ax.scatter(
+        x,
+        y,
+        facecolors=[equilibrium_marker_facecolor],
+        edgecolors=color,
+        linewidths=1.4,
+        marker="o",
+        s=outer_size,
+        label=label,
+        zorder=zorder,
+    )
+    ax.scatter(
+        x,
+        y,
+        color=color,
+        marker="o",
+        s=inner_size,
+        label="_nolegend_",
+        zorder=zorder + 0.1,
+    )
+
+def bullseye_legend_handle(color,outer_size,inner_size):
+    return (
+        mpl.lines.Line2D(
+            [],
+            [],
+            linestyle="None",
+            marker="o",
+            markerfacecolor=equilibrium_marker_facecolor,
+            markeredgecolor=color,
+            markeredgewidth=1.4,
+            markersize=np.sqrt(outer_size),
+        ),
+        mpl.lines.Line2D(
+            [],
+            [],
+            linestyle="None",
+            marker="o",
+            color=color,
+            markersize=np.sqrt(inner_size),
+        ),
+    )
+
+def finite_points(x,y):
+    x = np.asarray(x)
+    y = np.asarray(y)
+    mask = np.isfinite(x) & np.isfinite(y)
+    if not np.any(mask):
+        return np.empty((0,2))
+    return np.column_stack((x[mask],y[mask]))
+
+def choose_annotation_position(x0,y0,occupied_points,placed_positions,xlim,ylim):
+    x_span = max(xlim[1] - xlim[0],1e-12)
+    y_span = max(ylim[1] - ylim[0],1e-12)
+    margin_x = 0.025*x_span
+    margin_y = 0.025*y_span
+    offset_x = 0.018*x_span
+    offset_y = 0.018*y_span
+    candidate_offsets = [
+        (1.0,1.0),
+        (-1.0,1.0),
+        (1.0,-1.0),
+        (-1.0,-1.0),
+        (1.3,0.4),
+        (-1.3,0.4),
+        (1.3,-0.4),
+        (-1.3,-0.4),
+        (0.4,1.3),
+        (-0.4,1.3),
+        (0.4,-1.3),
+        (-0.4,-1.3),
+    ]
+    best_candidate = None
+    best_score = -np.inf
+
+    for sx,sy in candidate_offsets:
+        x_text = x0 + sx*offset_x
+        y_text = y0 + sy*offset_y
+        if x_text < xlim[0] + margin_x or x_text > xlim[1] - margin_x:
+            continue
+        if y_text < ylim[0] + margin_y or y_text > ylim[1] - margin_y:
+            continue
+
+        if len(occupied_points) > 0:
+            dx_occ = (occupied_points[:,0] - x_text) / x_span
+            dy_occ = (occupied_points[:,1] - y_text) / y_span
+            occupied_score = np.min(dx_occ**2 + dy_occ**2)
+        else:
+            occupied_score = np.inf
+
+        if len(placed_positions) > 0:
+            placed_points = np.asarray(placed_positions)
+            dx_lab = (placed_points[:,0] - x_text) / x_span
+            dy_lab = (placed_points[:,1] - y_text) / y_span
+            placed_score = np.min(dx_lab**2 + dy_lab**2)
+        else:
+            placed_score = np.inf
+
+        edge_score = min(
+            (x_text - xlim[0]) / x_span,
+            (xlim[1] - x_text) / x_span,
+            (y_text - ylim[0]) / y_span,
+            (ylim[1] - y_text) / y_span,
+        )
+        score = min(occupied_score,placed_score) + 0.25*edge_score
+        if score > best_score:
+            ha = "left" if sx > 0.1 else ("right" if sx < -0.1 else "center")
+            va = "bottom" if sy > 0.1 else ("top" if sy < -0.1 else "center")
+            best_candidate = (x_text,y_text,ha,va)
+            best_score = score
+
+    if best_candidate is None:
+        x_text = min(max(x0 + offset_x,xlim[0] + margin_x),xlim[1] - margin_x)
+        y_text = min(max(y0 + offset_y,ylim[0] + margin_y),ylim[1] - margin_y)
+        return (x_text,y_text,"left","bottom")
+    return best_candidate
+
+def annotate_equilibria(ax,a,b,occupied_points,xlim,ylim):
+    a = np.asarray(a)
+    b = np.asarray(b)
+    if len(a) <= 1:
+        return
+
+    placed_positions = []
+    eq_points = finite_points(a,b)
+    if len(eq_points) > 0:
+        if len(occupied_points) > 0:
+            occupied_points = np.vstack((occupied_points,eq_points))
+        else:
+            occupied_points = eq_points
+
+    for i in range(0,len(a)):
+        x_text,y_text,ha,va = choose_annotation_position(
+            a[i],
+            b[i],
+            occupied_points,
+            placed_positions,
+            xlim,
+            ylim,
+        )
+        ax.text(
+            x_text,
+            y_text,
+            str(i+1),
+            color="black",
+            ha=ha,
+            va=va,
+            bbox=dict(
+                facecolor="white",
+                edgecolor="0.5",
+                linewidth=0.6,
+                alpha=0.8,
+                boxstyle="round,pad=0.15",
+            ),
+            zorder=6,
+        )
+        placed_positions.append((x_text,y_text))
+
+def deduplicate_points(x,y,dx,dy):
+    x = np.asarray(x)
+    y = np.asarray(y)
+    mask = np.isfinite(x) & np.isfinite(y)
+    if not np.any(mask):
+        return np.empty((0,2))
+
+    points = np.column_stack((x[mask],y[mask]))
+    dedup_dx = max(dx/2,1e-12)
+    dedup_dy = max(dy/2,1e-12)
+    x0 = np.min(points[:,0])
+    y0 = np.min(points[:,1])
+    keys = np.column_stack((
+        np.rint((points[:,0]-x0)/dedup_dx).astype(np.int64),
+        np.rint((points[:,1]-y0)/dedup_dy).astype(np.int64),
+    ))
+    _, unique_idx = np.unique(keys,axis=0,return_index=True)
+    unique_idx = np.sort(unique_idx)
+    return points[unique_idx]
+
+def estimate_curve_steps(x,y,dx_fallback,dy_fallback):
+    x = np.asarray(x)
+    y = np.asarray(y)
+    mask = np.isfinite(x) & np.isfinite(y)
+    if np.sum(mask) < 2:
+        return (max(dx_fallback,1e-12),max(dy_fallback,1e-12))
+
+    x = x[mask]
+    y = y[mask]
+
+    unique_x = np.unique(np.sort(x))
+    if len(unique_x) > 1:
+        x_diffs = np.diff(unique_x)
+        x_diffs = x_diffs[x_diffs > 1e-12]
+        if len(x_diffs) > 0:
+            dx_est = max(dx_fallback,np.median(x_diffs))
+        else:
+            dx_est = max(dx_fallback,1e-12)
+    else:
+        dx_est = max(dx_fallback,1e-12)
+
+    order = np.argsort(x)
+    x_sorted = x[order]
+    y_sorted = y[order]
+    y_step_candidates = []
+    x_window = 1.5*dx_est
+    for i in range(0,len(x_sorted)-1):
+        dx_local = x_sorted[i+1] - x_sorted[i]
+        if dx_local > 1e-12 and dx_local <= x_window:
+            dy_local = np.abs(y_sorted[i+1] - y_sorted[i])
+            if dy_local > 1e-12:
+                y_step_candidates.append(dy_local)
+
+    if len(y_step_candidates) > 0:
+        dy_est = max(dy_fallback,np.median(y_step_candidates))
+    else:
+        dy_est = max(dy_fallback,1e-12)
+
+    return (dx_est,dy_est)
+
+def build_local_graph(points,dx,dy):
+    adjacency = [set() for _ in range(len(points))]
+    if len(points) <= 1:
+        return adjacency
+
+    x_tol = 1.75*dx
+    y_tol = 1.75*dy
+    order = np.argsort(points[:,0])
+    for pos in range(0,len(order)):
+        i = order[pos]
+        for next_pos in range(pos+1,len(order)):
+            j = order[next_pos]
+            if points[j,0] - points[i,0] > x_tol:
+                break
+            x_scaled = (points[j,0] - points[i,0]) / max(dx,1e-12)
+            y_scaled = np.abs(points[j,1] - points[i,1]) / max(dy,1e-12)
+            if np.abs(points[j,1] - points[i,1]) <= y_tol and x_scaled**2 + y_scaled**2 <= 7.5:
+                adjacency[i].add(j)
+                adjacency[j].add(i)
+    return adjacency
+
+def connected_components(adjacency,points):
+    visited = np.zeros(len(adjacency),dtype=np.bool_)
+    components = []
+    for i in range(0,len(adjacency)):
+        if visited[i]:
+            continue
+        stack = [i]
+        visited[i] = True
+        component = []
+        while len(stack) > 0:
+            current = stack.pop()
+            component.append(current)
+            for nbr in adjacency[current]:
+                if not visited[nbr]:
+                    visited[nbr] = True
+                    stack.append(nbr)
+        components.append(component)
+    components.sort(key=lambda comp: np.min(points[comp,0]))
+    return components
+
+def scaled_distance(point_a,point_b,dx,dy):
+    return np.sqrt(
+        ((point_a[0] - point_b[0]) / max(dx,1e-12))**2
+        + ((point_a[1] - point_b[1]) / max(dy,1e-12))**2
+    )
+
+def build_component_mst(component,adjacency,points,dx,dy):
+    if len(component) <= 1:
+        return {node: set() for node in component}
+
+    component_set = set(component)
+    tree_adjacency = {node: set() for node in component}
+    visited = {component[0]}
+
+    while len(visited) < len(component):
+        best_edge = None
+        best_weight = np.inf
+        for node in visited:
+            for nbr in adjacency[node]:
+                if nbr not in component_set or nbr in visited:
+                    continue
+                weight = scaled_distance(points[node],points[nbr],dx,dy)
+                if weight < best_weight:
+                    best_weight = weight
+                    best_edge = (node,nbr)
+
+        if best_edge is None:
+            return None
+
+        node,nbr = best_edge
+        tree_adjacency[node].add(nbr)
+        tree_adjacency[nbr].add(node)
+        visited.add(nbr)
+
+    return tree_adjacency
+
+def order_line_component(component,adjacency,points,dx,dy):
+    if len(component) == 1:
+        return None
+
+    tree_adjacency = build_component_mst(component,adjacency,points,dx,dy)
+    if tree_adjacency is None:
+        return None
+
+    degrees = {}
+    for node in component:
+        degrees[node] = len(tree_adjacency[node])
+
+    if any(degrees[node] > 2 for node in component):
+        return None
+
+    endpoints = [node for node in component if degrees[node] == 1]
+    if len(component) == 2:
+        if len(endpoints) != 2:
+            return None
+    elif len(endpoints) != 2:
+        return None
+
+    start = endpoints[0]
+    ordered = [start]
+    visited = {start}
+    prev = None
+    current = start
+
+    while True:
+        nbrs = [nbr for nbr in tree_adjacency[current] if nbr != prev]
+        if len(nbrs) == 0:
+            break
+        if len(nbrs) > 1:
+            return None
+        nxt = nbrs[0]
+        if nxt in visited:
+            return None
+        ordered.append(nxt)
+        visited.add(nxt)
+        prev = current
+        current = nxt
+
+    if len(ordered) != len(component):
+        return None
+    return ordered
+
+def decompose_component_paths(component,adjacency,points,dx,dy):
+    if len(component) == 0:
+        return [], []
+
+    tree_adjacency = build_component_mst(component,adjacency,points,dx,dy)
+    if tree_adjacency is None:
+        return [], component
+
+    degrees = {node: len(tree_adjacency[node]) for node in component}
+    ordered = order_line_component(component,adjacency,points,dx,dy)
+    if ordered is not None:
+        return [ordered], []
+
+    special_nodes = [node for node in component if degrees[node] != 2]
+    if len(special_nodes) == 0:
+        return [], component
+
+    paths = []
+    used_edges = set()
+    for start in special_nodes:
+        for nbr in tree_adjacency[start]:
+            edge = tuple(sorted((start,nbr)))
+            if edge in used_edges:
+                continue
+
+            path = [start,nbr]
+            used_edges.add(edge)
+            prev = start
+            current = nbr
+
+            while degrees[current] == 2:
+                next_nodes = [node for node in tree_adjacency[current] if node != prev]
+                if len(next_nodes) != 1:
+                    break
+                nxt = next_nodes[0]
+                edge = tuple(sorted((current,nxt)))
+                if edge in used_edges:
+                    break
+                path.append(nxt)
+                used_edges.add(edge)
+                prev = current
+                current = nxt
+
+            paths.append(path)
+
+    residual_nodes = [node for node in component if degrees[node] > 2]
+    covered_nodes = set()
+    for path in paths:
+        covered_nodes.update(path)
+    for node in component:
+        if node not in covered_nodes:
+            residual_nodes.append(node)
+
+    residual_nodes = sorted(set(residual_nodes))
+    return paths,residual_nodes
+
+def plot_point_graph(ax,x,y,color,dx,dy,warning_label,residual_scatter_only=False):
+    points = deduplicate_points(x,y,dx,dy)
+    if len(points) == 0:
+        return None
+
+    adjacency = build_local_graph(points,dx,dy)
+    components = connected_components(adjacency,points)
+    first_line_handle = None
+    first_scatter_handle = None
+    for i in range(0,len(components)):
+        comp_points = points[components[i],:]
+        if residual_scatter_only:
+            paths,residual_nodes = decompose_component_paths(components[i],adjacency,points,dx,dy)
+            if len(paths) == 0:
+                scatter_handle = ax.scatter(comp_points[:,0],comp_points[:,1],color=color,s=1)
+                if first_scatter_handle is None:
+                    first_scatter_handle = scatter_handle
+                if len(components[i]) > 1:
+                    warnings.warn(
+                        warning_label + ": component " + str(i+1) + " has no line part; plotting as scatter.",
+                        UserWarning,
+                    )
+                continue
+
+            for path in paths:
+                if len(path) >= 2:
+                    line_points = points[path,:]
+                    line_handle, = ax.plot(line_points[:,0],line_points[:,1],color=color,linewidth=consistent_linewidth)
+                    if first_line_handle is None:
+                        first_line_handle = line_handle
+
+            if len(residual_nodes) > 0:
+                residual_points = points[residual_nodes,:]
+                scatter_handle = ax.scatter(residual_points[:,0],residual_points[:,1],color=color,s=residual_scatter_size)
+                if first_scatter_handle is None:
+                    first_scatter_handle = scatter_handle
+                warnings.warn(
+                    warning_label + ": component " + str(i+1) + " has residual non-line points; plotting those as scatter.",
+                    UserWarning,
+                )
+            continue
+
+        ordered = order_line_component(components[i],adjacency,points,dx,dy)
+        if ordered is None:
+            scatter_handle = ax.scatter(comp_points[:,0],comp_points[:,1],color=color,s=1)
+            if first_scatter_handle is None:
+                first_scatter_handle = scatter_handle
+            if len(components[i]) > 1:
+                warnings.warn(
+                    warning_label + ": component " + str(i+1) + " is not line-shaped; plotting as scatter.",
+                    UserWarning,
+                )
+        else:
+            line_points = points[ordered,:]
+            line_handle, = ax.plot(line_points[:,0],line_points[:,1],color=color,linewidth=consistent_linewidth)
+            if first_line_handle is None:
+                first_line_handle = line_handle
+    if first_line_handle is not None:
+        return first_line_handle
+    return first_scatter_handle
+
+def do_plot(m,kap,rho,thea,theb,av,bv,a0,b0,eps,N,name,approx=False,add=None,approx2=False,base_plot_name=None):
     b_vec = np.linspace(b0,b0+bv,N)
     a_vec = np.linspace(a0,a0+av,N)
 
-    x,y = find_group_br_a_vecb(m,thea,kap,a0,av,b_vec,eps)
+    # Combine both scan directions so near-vertical / near-horizontal branches stay visible.
+    x_forward,y_forward = find_group_br_a_vecb(m,thea,kap,a0,av,b_vec,eps)
+    x_reverse,y_reverse = find_group_br_a_veca(m,thea,kap,a0,av,b0,bv,a_vec,eps)
+    x = np.concatenate((x_forward,x_reverse))
+    y = np.concatenate((y_forward,y_reverse))
     x[x==0] = np.nan
     y[y==0] = np.nan
-    z,w = find_group_br_b_veca(m,theb,kap,rho,b0,bv,a_vec,eps)
+    z_forward,w_forward = find_group_br_b_veca(m,theb,kap,rho,b0,bv,a_vec,eps)
+    z_reverse,w_reverse = find_group_br_b_vecb(m,theb,kap,rho,b0,bv,a0,av,b_vec,eps)
+    z = np.concatenate((z_forward,z_reverse))
+    w = np.concatenate((w_forward,w_reverse))
     z[z==0] = np.nan
     w[w==0] = np.nan
 
@@ -26,12 +568,24 @@ def do_plot(m,kap,rho,thea,theb,av,bv,a0,b0,eps,N,name,approx=False,add=None,app
         b = np.append(b,add[1])
 
     fig, ax = plt.subplots(figsize=(5,5))
-    ax.scatter(x,y,color=color_a,s=1)
-    ax.scatter(z,w,color=color_b,s=1)
-    ax.plot([np.nan],[np.nan],color=color_a,label="$A$-consistent")
-    ax.plot([np.nan],[np.nan],color=color_b,label="$B$-consistent")
-    ax.plot(np.linspace(max(a0,b0),min(b0+bv,a0+av),N),np.linspace(max(a0,b0),min(b0+bv,a0+av),N),color="black",label="b=a",linestyle="--")
+    delta_a = a_vec[1] - a_vec[0]
+    delta_b = b_vec[1] - b_vec[0]
+    a_consistent_handle = plot_point_graph(ax,x,y,consistent_color_a,delta_a,delta_b,name + " A-consistent",residual_scatter_only=True)
+    b_consistent_handle = plot_point_graph(ax,z,w,color_b,delta_a,delta_b,name + " B-consistent",residual_scatter_only=True)
+    diagonal_handle, = ax.plot(
+        np.linspace(max(a0,b0),min(b0+bv,a0+av),N),
+        np.linspace(max(a0,b0),min(b0+bv,a0+av),N),
+        color="black",
+        label="b=a",
+        linestyle="--",
+        linewidth=consistent_linewidth,
+    )
+    if a_consistent_handle is not None:
+        a_consistent_handle.set_label("$A$-consistent")
+    if b_consistent_handle is not None:
+        b_consistent_handle.set_label("$B$-consistent")
 
+    equilibrium_handle = None
     for i in range(0,len(a)):
         
         stability_test_b_minus = [b[i],b[i]]
@@ -86,13 +640,17 @@ def do_plot(m,kap,rho,thea,theb,av,bv,a0,b0,eps,N,name,approx=False,add=None,app
         # if np.abs(plotline_a_minus[-1]-a[i]) < 1e-3 + 1e-4 and np.abs(plotline_b_minus[-1]-b[i]) < 1e-3+ 1e-4 and np.abs(plotline_a_plus[-1]-a[i]) < 1e-3+ 1e-4 and np.abs(plotline_b_plus[-1]-b[i]) < 1e-3+ 1e-4:
     
             
-        ax.scatter(a[i],b[i],color="black",marker="*",s=15)
+        plot_bullseye(
+            ax,
+            a[i],
+            b[i],
+            equilibrium_marker_color,
+            equilibrium_marker_outer_size,
+            equilibrium_marker_inner_size,
+            equilibrium_marker_zorder,
+        )
         # else:
             # ax.scatter(a[i],b[i],color="red",marker="*",s=15)
-
-        if i == 0:
-            ax.scatter([np.nan],[np.nan],color="black",marker="*",s=15,label="Equilibria")
-            # ax.scatter([np.nan],[np.nan],color="red",marker="*",s=15,label="Unstable Equilibria")
 
 
 
@@ -104,11 +662,15 @@ def do_plot(m,kap,rho,thea,theb,av,bv,a0,b0,eps,N,name,approx=False,add=None,app
         print("stab_a_plus ",stability_test_a_plus[-1],stability_test_b_plus[-1])
         print("stab_a_minus",stability_test_a_minus[-1],stability_test_b_minus[-1])
         
-
-        ax.annotate(r"$" + str(i+1) + r"$",(a[i]+0.005,b[i]+0.005),color="black")
         print(name)
         print("a=" + str(a[i]))
         print("b=" + str(b[i]))
+    if len(a) > 0:
+        equilibrium_handle = bullseye_legend_handle(
+            equilibrium_marker_color,
+            equilibrium_marker_outer_size,
+            equilibrium_marker_inner_size,
+        )
     # uncomment to plot the ratio condition:
     # quadsol = a0 /2 + np.sqrt(a0**2/ 4 + (av**2/(rho*bv**2))*(b_vec**2 - b0*b_vec))
     # plt.plot(quadsol,b_vec,color="green",label=r"$\frac{b}{\rho a} = \frac{C_A'(a)}{C_B'(b)}$")
@@ -122,34 +684,110 @@ def do_plot(m,kap,rho,thea,theb,av,bv,a0,b0,eps,N,name,approx=False,add=None,app
     else:
         fig.text(0.5,-0.04,r'$a_0=' + str(a0) +r',a_v=' + str(av) + r',b_0=' + str(b0) + r',b_v=' + str(bv) + r'$',ha="center")
     ax.set_ylabel("$b$")
-    ax.legend()
-    plt.savefig("1d_plots/" + name + ".png",format="png",dpi=600,bbox_inches="tight")
+    set_boundary_ticks(ax,a0,av,b0,bv)
+    legend_handles = []
+    legend_labels = []
+    for handle in [a_consistent_handle,b_consistent_handle,diagonal_handle]:
+        if handle is not None:
+            legend_handles.append(handle)
+            legend_labels.append(handle.get_label())
+    if equilibrium_handle is not None:
+        legend_handles.append(equilibrium_handle)
+        legend_labels.append(equilibrium_marker_label(len(a)))
+    ax.legend(handles=legend_handles,labels=legend_labels,handler_map={tuple: HandlerTuple(ndivide=1)})
+    set_axis_bounds(ax, xlim=(a0,a0+av), ylim=(b0,b0+bv))
+    output_name = name if base_plot_name is None else base_plot_name
+    plt.savefig("1d_plots/" + output_name + ".png",format="png",dpi=600,bbox_inches="tight")
     plt.close()
     if len(a) > 0:
         fig, ax = plt.subplots(figsize=(5,5))
         ax.set_xlabel("$a^i$")
-        ax.set_ylabel("$EU_A^\kappa(a,a^i)$")
+        ax.set_ylabel(r"$EU_A^\kappa(a,a^i)$")
         viridis_map_new = mpl.colormaps.get_cmap('viridis')
         viridis_new = viridis_map_new(np.linspace(0,1,len(a)))
+        single_equilibrium = len(a) == 1
         if add is None:
             for i in range(0,len(a)):
-                plt.scatter(a[i],utility_a(m,thea,kap,a0,av,a[i],b[i],a[i]),color=viridis_new[i],marker="*",s=15)
-                plt.plot(a_vec,utility_a(m,thea,kap,a0,av,a[i],b[i],a_vec),color=viridis_new[i],label=r"$(a,b)=(a_" + str(i+1) + r",b_" + str(i+1) + r")$")
+                plot_bullseye(
+                    ax,
+                    a[i],
+                    utility_a(m,thea,kap,a0,av,a[i],b[i],a[i]),
+                    viridis_new[i],
+                    deviation_equilibrium_marker_outer_size,
+                    deviation_equilibrium_marker_inner_size,
+                    equilibrium_marker_zorder,
+                )
+                plt.plot(
+                    a_vec,
+                    utility_a(m,thea,kap,a0,av,a[i],b[i],a_vec),
+                    color=viridis_new[i],
+                    label="_nolegend_" if single_equilibrium else equilibrium_pair_label(len(a),i),
+                )
         else:
             for i in range(0,len(a)):
-                plt.scatter(a[i],utility_a(m,thea,kap,a0,av,a[i],b[i],a[i]),color=viridis_new[0],marker="*",s=15)
+                plot_bullseye(
+                    ax,
+                    a[i],
+                    utility_a(m,thea,kap,a0,av,a[i],b[i],a[i]),
+                    viridis_new[0],
+                    deviation_equilibrium_marker_outer_size,
+                    deviation_equilibrium_marker_inner_size,
+                    equilibrium_marker_zorder,
+                )
                 if i == 0:
-                    plt.plot(a_vec,utility_a(m,thea,kap,a0,av,a[i],b[i],a_vec),color=viridis_new[i],label=r"$(a,b)=(a_" + str(i+1) + r",b_" + str(i+1) + r")$")
-        plt.legend()
+                    plt.plot(
+                        a_vec,
+                        utility_a(m,thea,kap,a0,av,a[i],b[i],a_vec),
+                        color=viridis_new[i],
+                        label="_nolegend_" if single_equilibrium else equilibrium_pair_label(len(a),i),
+                    )
+        legend_handles,legend_labels = ax.get_legend_handles_labels()
+        if len(a) > 0:
+            legend_color = viridis_new[0] if single_equilibrium else "black"
+            legend_handles.append(
+                bullseye_legend_handle(
+                    legend_color,
+                    deviation_equilibrium_marker_outer_size,
+                    deviation_equilibrium_marker_inner_size,
+                )
+            )
+            legend_labels.append(equilibrium_marker_label(len(a)))
+        ax.legend(handles=legend_handles,labels=legend_labels,handler_map={tuple: HandlerTuple(ndivide=1)})
+        set_axis_bounds(ax, xlim=(a0,a0+av))
         plt.savefig("1d_plots/" + name + "_deviations_A.png",format="png",dpi=600,bbox_inches="tight")
         plt.close()
         fig, ax = plt.subplots(figsize=(5,5))
         ax.set_xlabel("$b^i$")
-        ax.set_ylabel("$EU_B^\kappa(b,b^i)$")
+        ax.set_ylabel(r"$EU_B^\kappa(b,b^i)$")
         for i in range(0,len(a)):
-            plt.scatter(b[i],utility_b(m,theb,kap,rho,b0,bv,a[i],b[i],b[i]),color=viridis_new[i],marker="*",s=15)
-            plt.plot(b_vec,utility_b(m,theb,kap,rho,b0,bv,a[i],b[i],b_vec),color=viridis_new[i],label=r"$(a,b)=(a_" + str(i+1) + r",b_" + str(i+1) + r")$")
-        plt.legend()
+            plot_bullseye(
+                ax,
+                b[i],
+                utility_b(m,theb,kap,rho,b0,bv,a[i],b[i],b[i]),
+                viridis_new[i],
+                deviation_equilibrium_marker_outer_size,
+                deviation_equilibrium_marker_inner_size,
+                equilibrium_marker_zorder,
+            )
+            plt.plot(
+                b_vec,
+                utility_b(m,theb,kap,rho,b0,bv,a[i],b[i],b_vec),
+                color=viridis_new[i],
+                label="_nolegend_" if single_equilibrium else equilibrium_pair_label(len(a),i),
+            )
+        legend_handles,legend_labels = ax.get_legend_handles_labels()
+        if len(a) > 0:
+            legend_color = viridis_new[0] if single_equilibrium else "black"
+            legend_handles.append(
+                bullseye_legend_handle(
+                    legend_color,
+                    deviation_equilibrium_marker_outer_size,
+                    deviation_equilibrium_marker_inner_size,
+                )
+            )
+            legend_labels.append(equilibrium_marker_label(len(a)))
+        ax.legend(handles=legend_handles,labels=legend_labels,handler_map={tuple: HandlerTuple(ndivide=1)})
+        set_axis_bounds(ax, xlim=(b0,b0+bv))
         plt.savefig("1d_plots/" + name + "_deviations_B.png",format="png",dpi=600,bbox_inches="tight")
         plt.close()
 
@@ -192,6 +830,42 @@ bv = 1.25
 kap = 0.1
 
 do_plot(m,kap,rho,thea,theb,av,bv,a0,b0,eps,N,"ex_post_br_1_eq_kap_0_1")
+
+m = 20.0
+kap = 0.35
+rho = 10.0
+thea = 0.4
+theb = 1.8
+a0 = 0.85
+av = 1.65
+b0 = 0.2
+bv = 0.7
+
+do_plot(
+    m,
+    kap,
+    rho,
+    thea,
+    theb,
+    av,
+    bv,
+    a0,
+    b0,
+    eps,
+    N,
+    "turnout_higher_with_nonpartisan",
+    base_plot_name="turnout_higher_with_nonpartisan_equilibria",
+)
+
+m = 4.8
+rho = 2.35
+thea = 2.0
+theb = thea
+a0 = 0.5
+b0 = 0.1
+av = 1.25
+bv = 1.25
+kap = 0.1
 
 
 # plot accessible A
@@ -244,11 +918,11 @@ for m in [5.0,10.0,20.0]:
 
     ax1.quiver(akap_arr[0:-1],utility_arr[0:-1],akap_dir,utility_dir,scale=1.0,angles="xy",scale_units="xy",width=0.003,units="width")
     ax1.scatter([], [], marker=r'$\longrightarrow$', c="black",label=r"BR as $\kappa\uparrow$",s=100)
-    ax1.set_xlabel("$a^\kappa$")
-    ax1.set_ylabel("$EU_A^\kappa(a,a^i)$")
+    ax1.set_xlabel(r"$a^\kappa$")
+    ax1.set_ylabel(r"$EU_A^\kappa(a,a^i)$")
     ax1.set_title(r"$a=" + str(a) + r", b=" + str(b)+ r"$")
     ax1.legend()
-    ax2.set_xlabel("$a^\kappa$")
+    ax2.set_xlabel(r"$a^\kappa$")
     ax2.set_ylabel("benefit term")
     ax2.set_title(r"$a=" + str(a) + r", b=" + str(b)+ r"$")
 
@@ -322,17 +996,18 @@ for m in [5.0,10.0,20.0]:
         utility_dir = utility_arr[1:] - utility_arr[0:-1]
         ax3.quiver(akap_arr[:-1],utility_arr[:-1],akap_dir,utility_dir,scale=1,angles="xy",scale_units="xy",width=0.003,units="width")
     ax3.scatter([], [], marker=r'$\longrightarrow$', c="black",label=r"BR as $\kappa\uparrow$",s=100)
-    ax3.set_xlabel("$a^\kappa$")
-    ax3.set_ylabel("$EU_A^\kappa(a,a^i)$")
+    ax3.set_xlabel(r"$a^\kappa$")
+    ax3.set_ylabel(r"$EU_A^\kappa(a,a^i)$")
     ax3.set_title(r"$a=" + str(a) + r", b=" + str(b)+ r"$")
     ax3.legend()
-    ax4.set_xlabel("$a^\kappa$")
+    ax4.set_xlabel(r"$a^\kappa$")
     ax4.set_ylabel("benefit term")
     ax4.set_title(r"$a=" + str(a) + r", b=" + str(b)+ r"$")
 
     ax4.legend()
 
     fig.text(0.5,0.05,r'$m='+ str(m) + r',\rho =' + str(rho) + r',\theta_A=' + str(thea) + r',\theta_B=' + str(theb) + r',a_0=' + str(a0) +r',a_v=' + str(av) + r',b_0=' + str(b0) + r',b_v=' + str(bv) + r'$' ,ha="center") 
+    set_axes_bounds([ax1,ax2,ax3,ax4])
     plt.savefig(f"1d_plots/accessible_A_m={m}.png",format="png",dpi=600,bbox_inches="tight")
 
 a= 1.1
@@ -416,8 +1091,8 @@ ax2.scatter([], [], marker=r'$\longrightarrow$', c="black",label=r"BR as $\theta
 
 ax1.set_xlabel(r"$a^i$")
 ax2.set_xlabel(r"$a^i$")
-ax1.set_ylabel("$EU_A^\kappa(a,a^i)$")
-ax2.set_ylabel("$EU_A^\kappa(a,a^i)$")
+ax1.set_ylabel(r"$EU_A^\kappa(a,a^i)$")
+ax2.set_ylabel(r"$EU_A^\kappa(a,a^i)$")
 ax1.legend()
 ax2.legend()
 
@@ -430,6 +1105,8 @@ fig.text(0.5,-0.04, r'$a_0=' + str(a0) +r',a_v=' + str(av) + r',b_0=' + str(b0) 
 
 ax1.set_title("$a=" + str(a) + r", b=" + str(b)+ r"$")
 ax2.set_title("$a=" + str(a) + r", b=" + str(b)+ r"$")
+set_axis_bounds(ax1, xlim=(a0,a0+av))
+set_axis_bounds(ax2, xlim=(a0,a0+av))
 fig.savefig("1d_plots/comp_stat_BR_m.png",format="png",dpi=600,bbox_inches="tight")
 fig2.savefig("1d_plots/comp_stat_BR_thea.png",format="png",dpi=600,bbox_inches="tight")
 plt.close()
@@ -477,12 +1154,13 @@ ax.quiver(br_arr[0:-1],utility_arr[0:-1],br_dir,utility_dir,scale=1.0,angles="xy
 ax.scatter([], [], marker=r'$\longrightarrow$', c="black",label=r"BR as $\rho\uparrow$",s=100)
 
 ax.set_xlabel(r"$b^i$")
-ax.set_ylabel("$EU_B^\kappa(b,b^i)$")
+ax.set_ylabel(r"$EU_B^\kappa(b,b^i)$")
 ax.legend()
 
 fig.text(0.5,-0.01, r'$m=' + str(m) + r',\kappa=' + str(kap) + r',\theta_A=' + str(thea) + r',\theta_B=' + str(theb) + ',$', ha="center")
 fig.text(0.5,-0.04, r'$a_0=' + str(a0) +r',a_v=' + str(av) + r',b_0=' + str(b0) + r',b_v=' + str(bv) + r'$' ,ha="center")
 ax.set_title("$a=" + str(a) + r", b=" + str(b)+ r"$")
+set_axis_bounds(ax, xlim=(b0,b0+bv))
 plt.savefig("1d_plots/comp_stat_BR_rho.png",format="png",dpi=600,bbox_inches="tight")
 
 a = 1.1
@@ -520,23 +1198,141 @@ fig.text(0.5,-0.01,r'$\kappa='+ str(kap) + r',\rho=' + str(rho) + r',\theta_A=' 
 
 fig.text(0.5,-0.04,r'$a_0=' + str(a0) +r',a_v=' + str(av) + r',b_0=' + str(b0) + r',b_v=' + str(bv) + r'$',ha="center")
 
-plt.savefig("1d_plots/comp_statics_m.png",format="png",dpi=600,bbox_inches="tight")
+set_axis_bounds(ax, xlim=(m_space[0],m_space[-1]), ylim=turnout_bounds(a0,av,b0,bv))
+plt.savefig("1d_plots/comp_statics_m_1.png",format="png",dpi=600,bbox_inches="tight")
+
+thea_eq_turnouts = 2.9
+theb_eq_turnouts = 2.9
+kap_eq_turnouts = 0.5
+rho_eq_turnouts = 5.0
+a0_eq_turnouts = 0.85
+b0_eq_turnouts = 0.6
+av_eq_turnouts = 0.9
+bv_eq_turnouts = b0_eq_turnouts * av_eq_turnouts / a0_eq_turnouts
+m_space_eq_turnouts = np.linspace(0.5,100.0,400)
+
+ms_eq_turnouts = []
+a_eq_turnouts = []
+b_eq_turnouts = []
+
+for m_eq_turnouts in m_space_eq_turnouts:
+    a_new,b_new = find_all_equilibria(
+        m_eq_turnouts,
+        thea_eq_turnouts,
+        theb_eq_turnouts,
+        kap_eq_turnouts,
+        rho_eq_turnouts,
+        a0_eq_turnouts,
+        b0_eq_turnouts,
+        av_eq_turnouts,
+        bv_eq_turnouts,
+        eps,
+    )
+    for j in range(0,len(a_new)):
+        ms_eq_turnouts.append(m_eq_turnouts)
+        a_eq_turnouts.append(a_new[j])
+        b_eq_turnouts.append(b_new[j])
+
+fig, ax = plt.subplots(figsize=(5,5))
+ax.set_xlabel(r"$m$")
+ax.scatter(ms_eq_turnouts,a_eq_turnouts,color=color_a,s=1)
+ax.scatter(ms_eq_turnouts,b_eq_turnouts,color=color_b,s=1)
+ax.plot([np.nan],[np.nan],color=color_a,label="$a$")
+ax.plot([np.nan],[np.nan],color=color_b,label="$b$")
+ax.plot(m_space_eq_turnouts,len(m_space_eq_turnouts)*[a0_eq_turnouts],linestyle="--",color=color_a,label=r"$a_0$")
+ax.plot(m_space_eq_turnouts,len(m_space_eq_turnouts)*[b0_eq_turnouts],linestyle="--",color=color_b,label=r"$b_0$")
+ax.plot(m_space_eq_turnouts,len(m_space_eq_turnouts)*[a0_eq_turnouts+av_eq_turnouts],linestyle="dotted",color=color_a,label=r"$a_0+a_v$")
+ax.plot(m_space_eq_turnouts,len(m_space_eq_turnouts)*[b0_eq_turnouts+bv_eq_turnouts],linestyle="dotted",color=color_b,label=r"$b_0+b_v$")
+ax.legend(loc="upper right")
+
+ax.set_ylabel(r"$a,b$")
+fig.text(0.5,-0.01,r'$\kappa='+ str(kap_eq_turnouts) + r',\rho=' + str(rho_eq_turnouts) + r',\theta_A=' + str(thea_eq_turnouts) + r',\theta_B=' + str(theb_eq_turnouts) + r',$',ha="center")
+fig.text(0.5,-0.04,r'$a_0=' + str(a0_eq_turnouts) +r',a_v=' + str(av_eq_turnouts) + r',b_0=' + str(b0_eq_turnouts) + r',b_v=\frac{b_0 a_v}{a_0}\approx' + str(round(bv_eq_turnouts,3)) + r'$',ha="center")
+
+set_axis_bounds(
+    ax,
+    xlim=(m_space_eq_turnouts[0],m_space_eq_turnouts[-1]),
+    ylim=turnout_bounds(a0_eq_turnouts,av_eq_turnouts,b0_eq_turnouts,bv_eq_turnouts),
+)
+plt.savefig("1d_plots/comp_statics_m_2.png",format="png",dpi=600,bbox_inches="tight")
+
+thea_eq_turnouts_nonpartisan = 0.4
+theb_eq_turnouts_nonpartisan = 1.8
+kap_eq_turnouts_nonpartisan = 0.35
+rho_eq_turnouts_nonpartisan = 10.0
+a0_eq_turnouts_nonpartisan = 0.85
+b0_eq_turnouts_nonpartisan = 0.2
+av_eq_turnouts_nonpartisan = 1.65
+bv_eq_turnouts_nonpartisan = 0.7
+m_space_eq_turnouts_nonpartisan = np.linspace(0.5,30.0,1000)
+
+ms_eq_turnouts_nonpartisan = []
+a_eq_turnouts_nonpartisan = []
+b_eq_turnouts_nonpartisan = []
+
+for m_eq_turnouts_nonpartisan in m_space_eq_turnouts_nonpartisan:
+    a_new,b_new = find_all_equilibria(
+        m_eq_turnouts_nonpartisan,
+        thea_eq_turnouts_nonpartisan,
+        theb_eq_turnouts_nonpartisan,
+        kap_eq_turnouts_nonpartisan,
+        rho_eq_turnouts_nonpartisan,
+        a0_eq_turnouts_nonpartisan,
+        b0_eq_turnouts_nonpartisan,
+        av_eq_turnouts_nonpartisan,
+        bv_eq_turnouts_nonpartisan,
+        eps,
+    )
+    for j in range(0,len(a_new)):
+        ms_eq_turnouts_nonpartisan.append(m_eq_turnouts_nonpartisan)
+        a_eq_turnouts_nonpartisan.append(a_new[j])
+        b_eq_turnouts_nonpartisan.append(b_new[j])
+
+fig, ax = plt.subplots(figsize=(5,5))
+ax.set_xlabel(r"$m$")
+ax.scatter(ms_eq_turnouts_nonpartisan,a_eq_turnouts_nonpartisan,color=color_a,s=1)
+ax.scatter(ms_eq_turnouts_nonpartisan,b_eq_turnouts_nonpartisan,color=color_b,s=1)
+ax.plot([np.nan],[np.nan],color=color_a,label="$a$")
+ax.plot([np.nan],[np.nan],color=color_b,label="$b$")
+ax.plot(m_space_eq_turnouts_nonpartisan,len(m_space_eq_turnouts_nonpartisan)*[a0_eq_turnouts_nonpartisan],linestyle="--",color=color_a,label=r"$a_0$")
+ax.plot(m_space_eq_turnouts_nonpartisan,len(m_space_eq_turnouts_nonpartisan)*[b0_eq_turnouts_nonpartisan],linestyle="--",color=color_b,label=r"$b_0$")
+ax.plot(m_space_eq_turnouts_nonpartisan,len(m_space_eq_turnouts_nonpartisan)*[a0_eq_turnouts_nonpartisan+av_eq_turnouts_nonpartisan],linestyle="dotted",color=color_a,label=r"$a_0+a_v$")
+ax.plot(m_space_eq_turnouts_nonpartisan,len(m_space_eq_turnouts_nonpartisan)*[b0_eq_turnouts_nonpartisan+bv_eq_turnouts_nonpartisan],linestyle="dotted",color=color_b,label=r"$b_0+b_v$")
+ax.legend(loc="upper right")
+
+ax.set_ylabel(r"$a,b$")
+fig.text(0.5,-0.01,r'$\kappa='+ str(kap_eq_turnouts_nonpartisan) + r',\rho=' + str(rho_eq_turnouts_nonpartisan) + r',\theta_A=' + str(thea_eq_turnouts_nonpartisan) + r',\theta_B=' + str(theb_eq_turnouts_nonpartisan) + r',$',ha="center")
+fig.text(0.5,-0.04,r'$a_0=' + str(a0_eq_turnouts_nonpartisan) +r',a_v=' + str(av_eq_turnouts_nonpartisan) + r',b_0=' + str(b0_eq_turnouts_nonpartisan) + r',b_v=' + str(bv_eq_turnouts_nonpartisan) + r'$',ha="center")
+
+set_axis_bounds(
+    ax,
+    xlim=(m_space_eq_turnouts_nonpartisan[0],m_space_eq_turnouts_nonpartisan[-1]),
+    ylim=turnout_bounds(a0_eq_turnouts_nonpartisan,av_eq_turnouts_nonpartisan,b0_eq_turnouts_nonpartisan,bv_eq_turnouts_nonpartisan),
+)
+plt.savefig("1d_plots/comp_statics_m_3.png",format="png",dpi=600,bbox_inches="tight")
 
 fig, ax = plt.subplots(figsize=(5,5))
 ax.set_xlabel(r"$m$")
 bs = [0.6,0.9,1.2,1.5]
 i=0
 for b in bs:
-    ms = []
-    a = []
+    ms_forward = []
+    a_forward = []
 
     for m in m_space:
         a_new = find_group_br_a(m,thea,kap,a0,av,b,eps)
         for j in range(0,len(a_new)):
-            ms.append(m)
-            a.append(a_new[j])
+            ms_forward.append(m)
+            a_forward.append(a_new[j])
 
-    ax.scatter(ms,a,color=viridis[2*i],s=1)
+    a_grid = np.linspace(a0,a0+av,len(m_space))
+    ms_reverse,a_reverse = find_group_br_a_vecm_from_a(m_space,thea,kap,a0,av,b,a_grid,eps)
+
+    ms = np.concatenate((np.array(ms_forward),ms_reverse))
+    a = np.concatenate((np.array(a_forward),a_reverse))
+
+    delta_m,delta_a = estimate_curve_steps(ms,a,m_space[1] - m_space[0],a_grid[1] - a_grid[0])
+    plot_point_graph(ax,ms,a,viridis[2*i],delta_m,delta_a,"comp_statics_m_a_consistent b=" + str(b))
     ax.plot(np.nan,np.nan,color=viridis[2*i],label=r"$b=" + str(b) + r"$")
     i+=1
 
@@ -546,6 +1342,7 @@ fig.text(0.5,-0.01,r'$\kappa='+ str(kap) + r',\rho=' + str(rho) + r',\theta_A=' 
 
 fig.text(0.5,-0.04,r'$a_0=' + str(a0) +r',a_v=' + str(av)  + r',b_0=' + str(b0) + r',b_v=' + str(bv) + r'$',ha="center")
 
+set_axis_bounds(ax, xlim=(m_space[0],m_space[-1]), ylim=(a0,a0+av))
 plt.savefig("1d_plots/comp_statics_m_a_consistent.png",format="png",dpi=600,bbox_inches="tight")
 
 m = 5.0
@@ -578,6 +1375,7 @@ fig.text(0.5,-0.01,r'$m='+ str(m) + r',\rho=' + str(rho) + r',\theta_A=' + str(t
 
 fig.text(0.5,-0.04,r'$a_0=' + str(a0) +r',a_v=' + str(av) + r',b_0=' + str(b0) + r',b_v=' + str(bv) + r'$',ha="center")
 
+set_axis_bounds(ax, xlim=(kap_space[0],kap_space[-1]), ylim=turnout_bounds(a0,av,b0,bv))
 plt.savefig("1d_plots/comp_statics_kap.png",format="png",dpi=600,bbox_inches="tight")
 
 
@@ -608,6 +1406,7 @@ fig.text(0.5,-0.01,r'$m='+ str(m) + r',\rho=' + str(rho) + r',\theta_A=' + str(t
 
 fig.text(0.5,-0.04,r'$a_0=' + str(a0) +r',a_v=' + str(av) + r'$',ha="center")
 
+set_axis_bounds(ax, xlim=(kap_space[0],kap_space[-1]), ylim=(a0,a0+av))
 plt.savefig("1d_plots/comp_statics_kap_a_consistent.png",format="png",dpi=600,bbox_inches="tight")
 
 
@@ -641,6 +1440,7 @@ ax.set_ylabel(r"$a,b$")
 fig.text(0.5,-0.01,r'$m='+ str(m) + r',\kappa=' + str(kap) + r',\theta_A=' + str(thea) + r',\theta_B=' + str(theb) + r',$',ha="center") 
 fig.text(0.5,-0.04,r'$a_0=' + str(a0) +r',a_v=' + str(av) + r',b_0=' + str(b0) + r',b_v=' + str(bv) + r'$',ha="center") 
 
+set_axis_bounds(ax, xlim=(rho_space[0],rho_space[-1]), ylim=turnout_bounds(a0,av,b0,bv))
 plt.savefig("1d_plots/comp_statics_rho.png",format="png",dpi=600,bbox_inches="tight")
 
 fig, ax = plt.subplots(figsize=(5,5))
@@ -668,73 +1468,8 @@ fig.text(0.5,-0.01,r'$m='+ str(m) + r',\kappa=' + str(kap) + r',\theta_A=' + str
 
 fig.text(0.5,-0.04,r'$b_0=' + str(b0) +r',b_v=' + str(bv) + r'$',ha="center")
 
+set_axis_bounds(ax, xlim=(rho_space[0],rho_space[-1]), ylim=(b0,b0+bv))
 plt.savefig("1d_plots/comp_statics_rho_b_consistent.png",format="png",dpi=600,bbox_inches="tight")
-
-
-
-
-
-
-m = 15.0
-rho_space = np.linspace(1.0,5.0,1000)
-rhos = []
-a = []
-b = []
-
-for rho in rho_space:
-    a_new,b_new = find_all_equilibria(m,thea,theb,kap,rho,a0,b0,av,bv,eps)
-    for j in range(0,len(a_new)):
-        rhos.append(rho)
-        a.append(a_new[j])
-        b.append(b_new[j])
-
-fig, ax = plt.subplots(figsize=(5,5))
-ax.set_xlabel(r"$\rho$")
-ax.scatter(rhos,a,color="black",s=1)
-ax.scatter(rhos,b,color=color_b,s=1)
-ax.plot([np.nan],[np.nan],color="black",label="$a$")
-ax.plot([np.nan],[np.nan],color=color_b,label="$b$")
-ax.plot(rho_space,len(rho_space)*[a0],linestyle="--",color="black",label=r"$a_0$")
-ax.plot(rho_space,len(rho_space)*[b0],linestyle="--",color=color_b,label=r"$b_0$")
-ax.plot(rho_space,len(rho_space)*[a0+av],linestyle="dotted",color="black",label=r"$a_0+a_v$")
-ax.plot(rho_space,len(rho_space)*[b0+bv],linestyle="dotted",color=color_b,label=r"$b_0+b_v$")
-ax.legend(loc="upper right")
-
-ax.set_ylabel(r"$a,b$")
-
-fig.text(0.5,-0.01,r'$m='+ str(m) + r',\kappa=' + str(kap) + r',\theta_A=' + str(thea) + r',\theta_B=' + str(theb) + r',$',ha="center") 
-
-fig.text(0.5,-0.04,r'$a_0=' + str(a0) +r',a_v=' + str(av) + r',b_0=' + str(b0) + r',b_v=' + str(bv) + r'$',ha="center") 
-
-plt.savefig("1d_plots/comp_statics_rho_high_m.png",format="png",dpi=600,bbox_inches="tight")
-
-fig, ax = plt.subplots(figsize=(5,5))
-ax.set_xlabel(r"$\rho$")
-a_s = [0.6,0.9,1.2,1.5]
-i=0
-for a in a_s:
-    rhos = []
-    b = []
-
-    for rho in rho_space:
-        b_new = find_group_br_b(m,theb,kap,rho,b0,bv,a,eps)
-        for j in range(0,len(b_new)):
-            rhos.append(rho)
-            b.append(b_new[j])
-
-    ax.scatter(rhos,b,color=viridis[2*i],s=1)
-    ax.plot(np.nan,np.nan,color=viridis[2*i],label=r"$a=" + str(a) + r"$")
-    i+=1
-
-ax.legend()
-ax.set_ylabel(r"$b$")
-fig.text(0.5,-0.01,r'$m='+ str(m) + r',\kappa=' + str(kap) + r',\theta_A=' + str(thea) + r',\theta_B=' + str(theb) + r',a_0=' + str(a0) +r',a_v=' + str(av) + r'$',ha="center")
-
-fig.text(0.5,-0.04,r'$b_0=' + str(b0) +r',b_v=' + str(bv) + r'$',ha="center")
-
-plt.savefig("1d_plots/comp_statics_rho_b_consistent_high_m.png",format="png",dpi=600,bbox_inches="tight")
-
-
 kap = 0.3
 do_plot(m,kap,rho,thea,theb,av,bv,a0,b0,eps,N,"ex_post_br_1_eq_kap_0_3")
 
@@ -813,6 +1548,11 @@ ax.set_xscale("log")
 fig.text(0.5,-0.01,r'$\kappa='+ str(kap) + r',\rho=' + str(rho) + r',\theta_A=' + str(thea) + r',\theta_B=' + str(theb) + r',$',ha="center")
 fig.text(0.5,-0.04,r'$a_0=' + str(a0) +r',a_v=' + str(av) + r',b_0=' + str(b0) + r',b_v=' + str(bv) + r'$',ha="center")
 
+set_axis_bounds(
+    ax,
+    xlim=(np.exp(np.log(10)*m_vec_ln[0]),np.exp(np.log(10)*m_vec_ln[-1])),
+    ylim=turnout_bounds(a0,av,b0,bv),
+)
 plt.savefig("1d_plots/limit_ex_post.png",format="png",dpi=600,bbox_inches="tight")
 
 # example for high turnout limit
@@ -853,6 +1593,11 @@ ax.set_xscale("log")
 fig.text(0.5,-0.01,r'$\kappa='+ str(kap) + r',\rho=' + str(rho) + r',\theta_A=' + str(thea) + r',\theta_B=' + str(theb) + r',$',ha="center")
 fig.text(0.5,-0.04,r'$a_0=' + str(a0) +r',a_v=' + str(av) + r',b_0=' + str(b0) + r',b_v=' + str(bv) + r'$',ha="center")
 
+set_axis_bounds(
+    ax,
+    xlim=(np.exp(np.log(10)*m_vec_ln[0]),np.exp(np.log(10)*m_vec_ln[-1])),
+    ylim=turnout_bounds(a0,av,b0,bv),
+)
 plt.savefig("1d_plots/limit_ex_post_high_turnout.png",format="png",dpi=600,bbox_inches="tight")
 
 # example for partial underdog compensation
@@ -910,5 +1655,19 @@ ax.plot([np.nan],[np.nan],color="black",label=r"$\frac{b}{b_v}$")
 ax.plot([np.nan],[np.nan],color="black",linestyle="dotted",label=r"$\rho \frac{a}{a_v}$")    
 ax.set_ylabel(r"$a,b$")
 ax.legend()
+y_values = []
+for i in range(0,3):
+    if len(a[i]) > 0:
+        y_values.append(np.array(a[i])/av)
+        y_values.append(np.array(b[i])/bv)
+        y_values.append(np.array(rho_list[i])*np.array(a[i])/av)
+if len(y_values) > 0:
+    set_axis_bounds(
+        ax,
+        xlim=(rho_vec[0],rho_vec[-1]),
+        ylim=(min(np.min(arr) for arr in y_values),max(np.max(arr) for arr in y_values)),
+    )
+else:
+    set_axis_bounds(ax, xlim=(rho_vec[0],rho_vec[-1]))
 plt.savefig("1d_plots/partial_compensation.png",format="png",dpi=600,bbox_inches="tight")
 plt.close()

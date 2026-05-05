@@ -60,6 +60,26 @@ def roots_aux_b(m, theb, kap,rho, b0, bv,a):
 
     return np.roots(coeffs)
 
+@nb.njit("c16[:](f8,f8,f8,f8,f8,f8)")
+def roots_aux_a_fixed_a(m, thea, kap, a0, av,a):
+    coeffs = np.empty(3,dtype=np.complex128)
+
+    coeffs[0] = (m**2 + 1)*(a-a0)
+    coeffs[1] = 2*(1-m**2)*a*(a-a0) - 2*av**2*kap*m/(thea*np.arctan(m))
+    coeffs[2] = (m**2 + 1)*a**2*(a-a0)
+
+    return np.roots(coeffs)
+
+@nb.njit("c16[:](f8,f8,f8,f8,f8,f8,f8)")
+def roots_aux_b_fixed_b(m, theb, kap,rho, b0, bv,b):
+    coeffs = np.empty(3,dtype=np.complex128)
+
+    coeffs[0] = (m**2 + 1)*(b-b0)
+    coeffs[1] = 2*(1-m**2)*b*(b-b0) - 2*bv**2*kap*m*rho/(theb*np.arctan(m))
+    coeffs[2] = (m**2 + 1)*b**2*(b-b0)
+
+    return np.roots(coeffs)
+
 @nb.njit("c16[:](f8,f8,f8,f8,f8,f8,f8)")
 def roots_utility_a(m, thea, kap, a0, av,a,b):
     coeffs = np.empty(4,dtype=np.complex128)
@@ -116,9 +136,11 @@ def is_group_br_b(roots,m,the,kap,rho,b0,bv,a,eps):
 def find_group_br_a(m,the,kap,a0,av,b,eps):
     roots = roots_aux_a(m, the, kap,a0,av,b)
     roots = np.real(roots[np.abs(np.imag(roots))< eps]) # only real roots
-    if np.any(roots> a0 + av):
-        roots = roots[roots < a0 + av] # only admissible
-        roots = np.append(roots, a0+av) # append potential corner solution
+    roots = roots[roots >= a0] # only admissible roots
+    if np.any(roots > a0 + av):
+        roots = roots[roots <= a0 + av]
+        if not np.any(np.abs(roots - (a0 + av)) < eps):
+            roots = np.append(roots, a0+av) # append potential corner solution
 
     tf_array = is_group_br_a(roots,m,the,kap,a0,av,b,eps)
     return roots[tf_array]
@@ -127,9 +149,11 @@ def find_group_br_a(m,the,kap,a0,av,b,eps):
 def find_group_br_b(m,the,kap,rho,b0,bv,a,eps):
     roots = roots_aux_b(m, the, kap,rho,b0,bv,a)
     roots = np.real(roots[np.abs(np.imag(roots))< eps]) # only real roots
-    if np.any(roots> b0 + bv):
-        roots = roots[roots < b0 + bv] # only admissible roots
-        roots = np.append(roots, b0+bv) # append potential corner solution
+    roots = roots[roots >= b0] # only admissible roots
+    if np.any(roots > b0 + bv):
+        roots = roots[roots <= b0 + bv]
+        if not np.any(np.abs(roots - (b0 + bv)) < eps):
+            roots = np.append(roots, b0+bv) # append potential corner solution
     
     tf_array = is_group_br_b(roots,m,the,kap,rho,b0,bv,a,eps)
     return roots[tf_array]
@@ -146,6 +170,23 @@ def find_group_br_a_vecb(m,the,kap,a0,av,b_vec,eps):
             count += 1
     return (x,y)
 
+def find_group_br_a_veca(m,the,kap,a0,av,b0,bv,a_vec,eps):
+    num_points = max(len(a_vec)-1,0)
+    x = np.zeros(2*num_points)
+    y = np.zeros(2*num_points)
+    count = 0
+    for i in range(1,len(a_vec)):
+        b_list = roots_aux_a_fixed_a(m, the, kap,a0,av,a_vec[i])
+        b_list = np.real(b_list[np.abs(np.imag(b_list)) < eps]) # only real roots
+        b_list = b_list[b_list >= b0] # only admissible roots
+        b_list = b_list[b_list <= b0 + bv]
+        for j in range(0,len(b_list)):
+            if is_group_br_a_single(a_vec[i],m,the,kap,a0,av,b_list[j],eps):
+                x[count] = a_vec[i]
+                y[count] = b_list[j]
+                count += 1
+    return (x,y)
+
 def find_group_br_b_veca(m,the,kap,rho,b0,bv,a_vec,eps):
     x = np.zeros(3*len(a_vec))
     y = np.zeros(3*len(a_vec))
@@ -156,6 +197,23 @@ def find_group_br_b_veca(m,the,kap,rho,b0,bv,a_vec,eps):
             x[count] = a_vec[i]
             y[count] = br_list[j]
             count += 1
+    return (x,y)
+
+def find_group_br_b_vecb(m,the,kap,rho,b0,bv,a0,av,b_vec,eps):
+    num_points = max(len(b_vec)-1,0)
+    x = np.zeros(2*num_points)
+    y = np.zeros(2*num_points)
+    count = 0
+    for i in range(1,len(b_vec)):
+        a_list = roots_aux_b_fixed_b(m, the, kap,rho,b0,bv,b_vec[i])
+        a_list = np.real(a_list[np.abs(np.imag(a_list)) < eps]) # only real roots
+        a_list = a_list[a_list >= a0] # only admissible roots
+        a_list = a_list[a_list <= a0 + av]
+        for j in range(0,len(a_list)):
+            if is_group_br_b_single(b_vec[i],m,the,kap,rho,b0,bv,a_list[j],eps):
+                x[count] = a_list[j]
+                y[count] = b_vec[i]
+                count += 1
     return (x,y)
 
 @nb.njit("c16[:](f8,f8,f8,f8,f8,f8,f8,f8,f8)")

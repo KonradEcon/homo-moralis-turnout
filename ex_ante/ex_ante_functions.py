@@ -94,6 +94,31 @@ def get_equilibria_a(m,the,kap,a0,b0,av,rho,bv,eps):
     else:
         return np.array([a0])
 
+def find_equilibria_a_veca(m,the,kap,b0,av,rho,bv,a0_min,a0_max,a_vec,eps):
+    a0_candidates = []
+    a_candidates = []
+
+    if rho * bv >= av or kap <= 0:
+        return np.zeros(0), np.zeros(0)
+
+    interaction_scale = 2 * (av - rho * bv) * m * kap * b0 * av / (the * np.arctan(m))
+    for a in a_vec:
+        interaction = (a + b0)**2 + m**2 * (a - b0)**2
+        if interaction <= eps:
+            continue
+
+        a0 = a - interaction_scale / interaction
+        if a0 < a0_min or a0 > a0_max:
+            continue
+        if a <= a0 or a >= a0 + av:
+            continue
+
+        if is_equilibrium_a(np.array([a]),m,the,kap,a0,b0,av,rho,bv,eps)[0]:
+            a0_candidates.append(a0)
+            a_candidates.append(a)
+
+    return np.array(a0_candidates), np.array(a_candidates)
+
 def count_equilibria_b(m,the,kap,a0,b0,av,rho,bv,eps):
     if kap > 0:
         roots = roots_aux_b(m,the,kap,a0,b0,av,rho,bv)
